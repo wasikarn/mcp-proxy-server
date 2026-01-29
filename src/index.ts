@@ -5,8 +5,9 @@ import { ProxyManager } from "./proxy.js";
 const config = await loadConfig();
 const manager = new ProxyManager();
 
-const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-const CLEANUP_INTERVAL_MS = 60 * 1000; // check every 60s
+const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const CLEANUP_INTERVAL_MS = 30 * 1000; // check every 30s
+const MAX_SESSIONS_PER_SERVER = 5;
 
 interface TrackedSession {
   transport: WebStandardStreamableHTTPServerTransport;
@@ -30,22 +31,38 @@ function jsonResponse(data: unknown, status = 200): Response {
 }
 
 /**
- * Close and remove sessions that have been idle longer than SESSION_TIMEOUT_MS.
+ * Close and remove sessions. If force=true, removes ALL sessions.
  */
-function purgeStale(): number {
+function purgeStale(force = false): number {
   const now = Date.now();
   let purged = 0;
   for (const [id, session] of sessions) {
-    if (now - session.lastActivity > SESSION_TIMEOUT_MS) {
+    if (force || now - session.lastActivity > SESSION_TIMEOUT_MS) {
       session.transport.close().catch(() => {});
       sessions.delete(id);
       purged++;
     }
   }
   if (purged > 0) {
-    console.log(`[sessions] Purged ${purged} stale session(s) (${sessions.size} remaining)`);
+    console.log(`[sessions] Purged ${purged} session(s)${force ? " (forced)" : ""} (${sessions.size} remaining)`);
   }
   return purged;
+}
+
+/**
+ * Evict oldest sessions for a server if over the cap.
+ */
+function evictOldest(serverName: string): void {
+  const serverSessions = [...sessions.entries()]
+    .filter(([, s]) => s.serverName === serverName)
+    .sort((a, b) => a[1].lastActivity - b[1].lastActivity);
+
+  while (serverSessions.length >= MAX_SESSIONS_PER_SERVER) {
+    const [id, session] = serverSessions.shift()!;
+    session.transport.close().catch(() => {});
+    sessions.delete(id);
+    console.log(`[sessions] Evicted oldest session for '${serverName}' (${sessions.size} remaining)`);
+  }
 }
 
 const cleanupInterval = setInterval(purgeStale, CLEANUP_INTERVAL_MS);
@@ -72,6 +89,9 @@ async function handleMcp(req: Request, serverName: string): Promise<Response> {
     existing.lastActivity = Date.now();
     return existing.transport.handleRequest(req);
   }
+
+  // Evict oldest sessions for this server if at cap
+  evictOldest(serverName);
 
   // New session — create transport + proxy server
   const transport = new WebStandardStreamableHTTPServerTransport({
@@ -127,10 +147,11 @@ const server = Bun.serve({
       });
     }
 
-    // Purge stale sessions
+    // Purge sessions (?force=true to purge all)
     if (pathname === "/sessions" && req.method === "DELETE") {
-      const purged = purgeStale();
-      return jsonResponse({ purged, remaining: sessions.size });
+      const force = url.searchParams.get("force") === "true";
+      const purged = purgeStale(force);
+      return jsonResponse({ purged, remaining: sessions.size, force });
     }
 
     // List available servers

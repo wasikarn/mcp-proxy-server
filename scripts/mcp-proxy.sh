@@ -75,6 +75,14 @@ cmd_status() {
     echo "MCP Proxy: stopped"
     rm -f "$PID_FILE" 2>/dev/null
   fi
+  # Show claude-mem worker count
+  local mem_daemon_pid
+  mem_daemon_pid=$(pgrep -f 'worker-service\.cjs' 2>/dev/null || true)
+  if [ -n "$mem_daemon_pid" ]; then
+    local workers
+    workers=$( (pgrep -P "$mem_daemon_pid" 2>/dev/null || true) | wc -l | tr -d ' ')
+    echo "claude-mem daemon: running (pid: $mem_daemon_pid, workers: $workers)"
+  fi
 }
 
 cmd_log() {
@@ -82,20 +90,39 @@ cmd_log() {
 }
 
 cmd_purge() {
-  echo "Purging stale sessions..."
-  curl -s -X DELETE "http://localhost:${PORT}/sessions" 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "  (proxy not running)"
+  local force=""
+  if [ "${2:-}" = "--force" ] || [ "${2:-}" = "-f" ]; then
+    force="?force=true"
+    echo "Force-purging ALL sessions..."
+  else
+    echo "Purging stale sessions..."
+  fi
+  curl -s -X DELETE "http://localhost:${PORT}/sessions${force}" 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "  (proxy not running)"
 }
 
 cmd_kill_orphans() {
+  # Kill claude-mem leaked workers (children of worker-service.cjs daemon)
+  local mem_daemon_pid
+  mem_daemon_pid=$(pgrep -f 'worker-service\.cjs' 2>/dev/null || true)
+  if [ -n "$mem_daemon_pid" ]; then
+    local mem_children
+    mem_children=$( (pgrep -P "$mem_daemon_pid" 2>/dev/null || true) | wc -l | tr -d ' ')
+    if [ "$mem_children" -gt 0 ]; then
+      echo "Killing $mem_children claude-mem worker processes (parent: $mem_daemon_pid)..."
+      pkill -P "$mem_daemon_pid" 2>/dev/null || true
+      sleep 1
+    fi
+  fi
+
+  # Kill remaining orphaned CLI processes (skip VSCode extension)
   local count
   count=$(pgrep -cf '\.local/bin/claude' 2>/dev/null || echo 0)
   if [ "$count" -eq 0 ]; then
     echo "No orphaned Claude Code processes found"
     return 0
   fi
-  echo "Found $count Claude Code processes"
+  echo "Found $count Claude Code CLI processes"
   pkill -f '\.local/bin/claude' 2>/dev/null || true
-  pkill -f 'claude-code.*native-binary/claude' 2>/dev/null || true
   sleep 2
   local remaining
   remaining=$(pgrep -cf '\.local/bin/claude' 2>/dev/null || echo 0)
@@ -108,10 +135,10 @@ case "${1:-}" in
   restart)      cmd_restart ;;
   status)       cmd_status ;;
   log)          cmd_log ;;
-  purge)        cmd_purge ;;
+  purge)        cmd_purge "$@" ;;
   kill-orphans) cmd_kill_orphans ;;
   *)
-    echo "Usage: $(basename "$0") {start|stop|restart|status|log|purge|kill-orphans}"
+    echo "Usage: $(basename "$0") {start|stop|restart|status|log|purge [--force]|kill-orphans}"
     exit 1
     ;;
 esac
