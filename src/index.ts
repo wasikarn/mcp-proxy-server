@@ -1,51 +1,51 @@
-import express from "express";
-import { randomUUID } from "crypto";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { loadConfig } from "./config.js";
 import { ProxyManager } from "./proxy.js";
 
-const config = loadConfig();
+const config = await loadConfig();
 const manager = new ProxyManager();
-const app = express();
-
-app.use(express.json());
 
 // Track active transports per session
-const sessions = new Map<string, StreamableHTTPServerTransport>();
+const sessions = new Map<string, WebStandardStreamableHTTPServerTransport>();
 
 /**
- * MCP Streamable HTTP endpoint per backend server.
- * Handles both POST (client→server) and GET (SSE stream).
+ * Extract serverName from pathname like /mcp/sequential-thinking
  */
-app.all("/mcp/:serverName", async (req, res) => {
-  const { serverName } = req.params;
+function parseMcpRoute(pathname: string): string | null {
+  const match = pathname.match(/^\/mcp\/([^/]+)$/);
+  return match ? match[1] : null;
+}
+
+function jsonResponse(data: unknown, status = 200): Response {
+  return Response.json(data, { status });
+}
+
+/**
+ * MCP Streamable HTTP handler per backend server.
+ */
+async function handleMcp(req: Request, serverName: string): Promise<Response> {
   const backend = manager.getBackend(serverName);
 
   if (!backend) {
-    res.status(404).json({ error: `Server '${serverName}' not found` });
-    return;
+    return jsonResponse({ error: `Server '${serverName}' not found` }, 404);
   }
 
   if (!backend.ready) {
-    res.status(503).json({ error: `Server '${serverName}' not ready` });
-    return;
+    return jsonResponse({ error: `Server '${serverName}' not ready` }, 503);
   }
 
   // Check for existing session
-  const sessionId = req.headers["mcp-session-id"] as string | undefined;
+  const sessionId = req.headers.get("mcp-session-id") ?? undefined;
 
-  if (sessionId && sessions.has(sessionId)) {
-    const transport = sessions.get(sessionId)!;
-    await transport.handleRequest(req, res, req.body);
-    return;
+  const existingTransport = sessionId ? sessions.get(sessionId) : undefined;
+  if (existingTransport) {
+    return existingTransport.handleRequest(req);
   }
 
   // New session — create transport + proxy server
-  // Store session eagerly inside sessionIdGenerator so it's available
-  // before handleRequest's streaming response completes.
-  const transport = new StreamableHTTPServerTransport({
+  const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => {
-      const id = randomUUID();
+      const id = crypto.randomUUID();
       sessions.set(id, transport);
       return id;
     },
@@ -59,56 +59,65 @@ app.all("/mcp/:serverName", async (req, res) => {
 
   const server = backend.createProxyServer();
   await server.connect(transport);
-  await transport.handleRequest(req, res, req.body);
-});
-
-// Health check
-app.get("/health", (_req, res) => {
-  res.json({
-    status: "ok",
-    servers: manager.getBackendNames(),
-    sessions: sessions.size,
-  });
-});
-
-// List available servers
-app.get("/", (_req, res) => {
-  const servers = manager.getBackendNames().map((name) => ({
-    name,
-    endpoint: `/mcp/${name}`,
-  }));
-  res.json({ servers });
-});
+  return transport.handleRequest(req);
+}
 
 // Startup
-async function main() {
-  await manager.startAll(config.servers);
+await manager.startAll(config.servers);
 
-  app.listen(config.port, () => {
-    console.log(`MCP Proxy Server running on http://localhost:${config.port}`);
-    console.log();
-    console.log("Available endpoints:");
-    for (const name of manager.getBackendNames()) {
-      console.log(`  → http://localhost:${config.port}/mcp/${name}`);
+const server = Bun.serve({
+  port: Number(Bun.env.PORT) || 9802,
+  async fetch(req) {
+    const url = new URL(req.url);
+    const { pathname } = url;
+
+    // MCP endpoint
+    const serverName = parseMcpRoute(pathname);
+    if (serverName) {
+      return handleMcp(req, serverName);
     }
-    console.log(`  → http://localhost:${config.port}/health`);
-    console.log();
-  });
+
+    // Health check
+    if (pathname === "/health" && req.method === "GET") {
+      return jsonResponse({
+        status: "ok",
+        servers: manager.getBackendNames(),
+        sessions: sessions.size,
+      });
+    }
+
+    // List available servers
+    if (pathname === "/" && req.method === "GET") {
+      const servers = manager.getBackendNames().map((name) => ({
+        name,
+        endpoint: `/mcp/${name}`,
+      }));
+      return jsonResponse({ servers });
+    }
+
+    return jsonResponse({ error: "Not Found" }, 404);
+  },
+});
+
+console.log(`MCP Proxy Server running on http://localhost:${server.port}`);
+console.log();
+console.log("Available endpoints:");
+for (const name of manager.getBackendNames()) {
+  console.log(`  → http://localhost:${server.port}/mcp/${name}`);
 }
+console.log(`  → http://localhost:${server.port}/health`);
+console.log();
 
 // Graceful shutdown
 process.on("SIGINT", async () => {
   console.log("\nShutting down...");
   await manager.stopAll();
+  server.stop();
   process.exit(0);
 });
 
 process.on("SIGTERM", async () => {
   await manager.stopAll();
+  server.stop();
   process.exit(0);
-});
-
-main().catch((err) => {
-  console.error("Fatal:", err);
-  process.exit(1);
 });

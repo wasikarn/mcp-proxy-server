@@ -29,7 +29,7 @@ export class BackendConnection {
     this.transport = new StdioClientTransport({
       command: _config.command,
       args: _config.args ?? [],
-      env: _config.env ? { ...process.env, ..._config.env } as Record<string, string> : undefined,
+      env: _config.env ? { ...Bun.env, ..._config.env } as Record<string, string> : undefined,
     });
 
     this.client = new Client(

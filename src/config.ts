@@ -1,18 +1,11 @@
-import { readFileSync } from "fs";
-import { resolve } from "path";
 import type { IProxyConfig } from "./types.js";
 
-const DEFAULT_CONFIG_PATH = resolve(process.cwd(), "config.json");
+const DEFAULT_CONFIG_PATH = `${import.meta.dir}/../config.json`;
 
-export function loadConfig(path?: string): IProxyConfig {
+export async function loadConfig(path?: string): Promise<IProxyConfig> {
   const configPath = path ?? DEFAULT_CONFIG_PATH;
 
-  const raw = readFileSync(configPath, "utf-8");
-  const parsed = JSON.parse(raw) as IProxyConfig;
-
-  if (!parsed.port || typeof parsed.port !== "number") {
-    throw new Error("config.json: 'port' must be a number");
-  }
+  const parsed = await Bun.file(configPath).json() as IProxyConfig;
 
   if (!parsed.servers || typeof parsed.servers !== "object") {
     throw new Error("config.json: 'servers' must be an object");
