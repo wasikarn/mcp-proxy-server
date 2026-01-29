@@ -81,7 +81,12 @@ cmd_log() {
   tail -f "$LOG_FILE"
 }
 
-cmd_cleanup() {
+cmd_purge() {
+  echo "Purging stale sessions..."
+  curl -s -X DELETE "http://localhost:${PORT}/sessions" 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "  (proxy not running)"
+}
+
+cmd_kill_orphans() {
   local count
   count=$(pgrep -cf '\.local/bin/claude' 2>/dev/null || echo 0)
   if [ "$count" -eq 0 ]; then
@@ -98,14 +103,15 @@ cmd_cleanup() {
 }
 
 case "${1:-}" in
-  start)   cmd_start ;;
-  stop)    cmd_stop ;;
-  restart) cmd_restart ;;
-  status)  cmd_status ;;
-  log)     cmd_log ;;
-  cleanup) cmd_cleanup ;;
+  start)        cmd_start ;;
+  stop)         cmd_stop ;;
+  restart)      cmd_restart ;;
+  status)       cmd_status ;;
+  log)          cmd_log ;;
+  purge)        cmd_purge ;;
+  kill-orphans) cmd_kill_orphans ;;
   *)
-    echo "Usage: $(basename "$0") {start|stop|restart|status|log|cleanup}"
+    echo "Usage: $(basename "$0") {start|stop|restart|status|log|purge|kill-orphans}"
     exit 1
     ;;
 esac

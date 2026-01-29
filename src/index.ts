@@ -5,8 +5,17 @@ import { ProxyManager } from "./proxy.js";
 const config = await loadConfig();
 const manager = new ProxyManager();
 
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const CLEANUP_INTERVAL_MS = 60 * 1000; // check every 60s
+
+interface TrackedSession {
+  transport: WebStandardStreamableHTTPServerTransport;
+  lastActivity: number;
+  serverName: string;
+}
+
 // Track active transports per session
-const sessions = new Map<string, WebStandardStreamableHTTPServerTransport>();
+const sessions = new Map<string, TrackedSession>();
 
 /**
  * Extract serverName from pathname like /mcp/sequential-thinking
@@ -19,6 +28,27 @@ function parseMcpRoute(pathname: string): string | null {
 function jsonResponse(data: unknown, status = 200): Response {
   return Response.json(data, { status });
 }
+
+/**
+ * Close and remove sessions that have been idle longer than SESSION_TIMEOUT_MS.
+ */
+function purgeStale(): number {
+  const now = Date.now();
+  let purged = 0;
+  for (const [id, session] of sessions) {
+    if (now - session.lastActivity > SESSION_TIMEOUT_MS) {
+      session.transport.close().catch(() => {});
+      sessions.delete(id);
+      purged++;
+    }
+  }
+  if (purged > 0) {
+    console.log(`[sessions] Purged ${purged} stale session(s) (${sessions.size} remaining)`);
+  }
+  return purged;
+}
+
+const cleanupInterval = setInterval(purgeStale, CLEANUP_INTERVAL_MS);
 
 /**
  * MCP Streamable HTTP handler per backend server.
@@ -37,16 +67,17 @@ async function handleMcp(req: Request, serverName: string): Promise<Response> {
   // Check for existing session
   const sessionId = req.headers.get("mcp-session-id") ?? undefined;
 
-  const existingTransport = sessionId ? sessions.get(sessionId) : undefined;
-  if (existingTransport) {
-    return existingTransport.handleRequest(req);
+  const existing = sessionId ? sessions.get(sessionId) : undefined;
+  if (existing) {
+    existing.lastActivity = Date.now();
+    return existing.transport.handleRequest(req);
   }
 
   // New session — create transport + proxy server
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => {
       const id = crypto.randomUUID();
-      sessions.set(id, transport);
+      sessions.set(id, { transport, lastActivity: Date.now(), serverName });
       return id;
     },
   });
@@ -79,11 +110,27 @@ const server = Bun.serve({
 
     // Health check
     if (pathname === "/health" && req.method === "GET") {
+      const now = Date.now();
+      let active = 0;
+      let stale = 0;
+      for (const session of sessions.values()) {
+        if (now - session.lastActivity > SESSION_TIMEOUT_MS) {
+          stale++;
+        } else {
+          active++;
+        }
+      }
       return jsonResponse({
         status: "ok",
         servers: manager.getBackendNames(),
-        sessions: sessions.size,
+        sessions: { total: sessions.size, active, stale },
       });
+    }
+
+    // Purge stale sessions
+    if (pathname === "/sessions" && req.method === "DELETE") {
+      const purged = purgeStale();
+      return jsonResponse({ purged, remaining: sessions.size });
     }
 
     // List available servers
@@ -111,12 +158,14 @@ console.log();
 // Graceful shutdown
 process.on("SIGINT", async () => {
   console.log("\nShutting down...");
+  clearInterval(cleanupInterval);
   await manager.stopAll();
   server.stop();
   process.exit(0);
 });
 
 process.on("SIGTERM", async () => {
+  clearInterval(cleanupInterval);
   await manager.stopAll();
   server.stop();
   process.exit(0);
