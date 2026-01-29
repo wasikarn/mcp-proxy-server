@@ -6,7 +6,12 @@
   "main": "src/index.ts",
   "scripts": {
     "start": "bun run src/index.ts",
-    "dev": "bun --watch src/index.ts"
+    "dev": "bun --watch src/index.ts",
+    "mcp:start": "./scripts/mcp-proxy.sh start",
+    "mcp:stop": "./scripts/mcp-proxy.sh stop",
+    "mcp:restart": "./scripts/mcp-proxy.sh restart",
+    "mcp:status": "./scripts/mcp-proxy.sh status",
+    "mcp:log": "./scripts/mcp-proxy.sh log"
   },
   "keywords": ["mcp", "proxy", "claude-code"],
   "author": "",
