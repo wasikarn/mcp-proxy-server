@@ -1,0 +1,39 @@
+{
+  "port": 8080,
+  "servers": {
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking@latest"]
+    },
+    "my-db": {
+      "command": "npx",
+      "args": ["-y", "@bytebase/dbhub@latest", "--config", "/path/to/dbhub.toml"]
+    },
+    "repomix": {
+      "command": "npx",
+      "args": ["-y", "repomix@latest", "--mcp"]
+    },
+    "github": {
+      "command": "github-mcp-server",
+      "args": ["stdio"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest", "--api-key", "your-api-key"]
+    },
+    "postman-api": {
+      "command": "npx",
+      "args": ["-y", "@postman/postman-mcp-server@latest", "--code"],
+      "env": {
+        "POSTMAN_API_KEY": "your-postman-api-key"
+      }
+    },
+    "mcp-atlassian": {
+      "command": "mcp-atlassian",
+      "args": ["--env-file", "/path/to/.env", "--jira-projects-filter=PROJ", "--confluence-spaces-filter=PROJ"]
+    }
+  }
+}

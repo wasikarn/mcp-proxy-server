@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.log
 config.json
+CLAUDE.md
+!/CLAUDE.md
