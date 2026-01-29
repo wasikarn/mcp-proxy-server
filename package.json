@@ -11,7 +11,8 @@
     "mcp:stop": "./scripts/mcp-proxy.sh stop",
     "mcp:restart": "./scripts/mcp-proxy.sh restart",
     "mcp:status": "./scripts/mcp-proxy.sh status",
-    "mcp:log": "./scripts/mcp-proxy.sh log"
+    "mcp:log": "./scripts/mcp-proxy.sh log",
+    "mcp:cleanup": "./scripts/mcp-proxy.sh cleanup"
   },
   "keywords": ["mcp", "proxy", "claude-code"],
   "author": "",

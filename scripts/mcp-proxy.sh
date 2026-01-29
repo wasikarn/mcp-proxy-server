@@ -31,21 +31,32 @@ cmd_start() {
 }
 
 cmd_stop() {
-  if [ ! -f "$PID_FILE" ]; then
-    echo "MCP Proxy not running (no pid file)"
-    return 0
+  local stopped=false
+  if [ -f "$PID_FILE" ]; then
+    local pid
+    pid=$(cat "$PID_FILE")
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null
+      sleep 1
+      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+      echo "MCP Proxy stopped (pid: $pid)"
+      stopped=true
+    fi
+    rm -f "$PID_FILE"
   fi
-  local pid
-  pid=$(cat "$PID_FILE")
-  if kill -0 "$pid" 2>/dev/null; then
-    kill "$pid" 2>/dev/null
+  # Fallback: kill any process still holding the port
+  local port_pid
+  port_pid=$(lsof -ti:"$PORT" 2>/dev/null || true)
+  if [ -n "$port_pid" ]; then
+    kill "$port_pid" 2>/dev/null
     sleep 1
-    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
-    echo "MCP Proxy stopped (pid: $pid)"
-  else
-    echo "MCP Proxy was not running"
+    kill -0 "$port_pid" 2>/dev/null && kill -9 "$port_pid" 2>/dev/null
+    echo "MCP Proxy stopped (port $PORT, pid: $port_pid)"
+    stopped=true
   fi
-  rm -f "$PID_FILE"
+  if [ "$stopped" = false ]; then
+    echo "MCP Proxy not running"
+  fi
 }
 
 cmd_restart() {
@@ -70,14 +81,31 @@ cmd_log() {
   tail -f "$LOG_FILE"
 }
 
+cmd_cleanup() {
+  local count
+  count=$(pgrep -cf '\.local/bin/claude' 2>/dev/null || echo 0)
+  if [ "$count" -eq 0 ]; then
+    echo "No orphaned Claude Code processes found"
+    return 0
+  fi
+  echo "Found $count Claude Code processes"
+  pkill -f '\.local/bin/claude' 2>/dev/null || true
+  pkill -f 'claude-code.*native-binary/claude' 2>/dev/null || true
+  sleep 2
+  local remaining
+  remaining=$(pgrep -cf '\.local/bin/claude' 2>/dev/null || echo 0)
+  echo "Killed $((count - remaining)) processes ($remaining still running)"
+}
+
 case "${1:-}" in
   start)   cmd_start ;;
   stop)    cmd_stop ;;
   restart) cmd_restart ;;
   status)  cmd_status ;;
   log)     cmd_log ;;
+  cleanup) cmd_cleanup ;;
   *)
-    echo "Usage: $(basename "$0") {start|stop|restart|status|log}"
+    echo "Usage: $(basename "$0") {start|stop|restart|status|log|cleanup}"
     exit 1
     ;;
 esac
