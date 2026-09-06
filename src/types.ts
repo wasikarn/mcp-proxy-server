@@ -1,9 +1,9 @@
 export interface IStdioServerConfig {
-  command: string;
-  args: string[];
-  env?: Record<string, string>;
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 export interface IProxyConfig {
-  servers: Record<string, IStdioServerConfig>;
+  readonly servers: Readonly<Record<string, IStdioServerConfig>>;
 }

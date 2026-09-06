@@ -20,16 +20,25 @@ import type { IStdioServerConfig } from "./types.js";
 export class BackendConnection {
   private client: Client;
   private transport: StdioClientTransport;
-  public ready = false;
+  private _ready = false;
+
+  /** True only while the client is connected to a live child process. */
+  get ready(): boolean {
+    return this._ready;
+  }
+
+  get pid(): number | null {
+    return this.transport.pid;
+  }
 
   constructor(
     public readonly name: string,
-    private readonly _config: IStdioServerConfig,
+    config: IStdioServerConfig,
   ) {
     this.transport = new StdioClientTransport({
-      command: _config.command,
-      args: _config.args ?? [],
-      env: _config.env ? { ...Bun.env, ..._config.env } as Record<string, string> : undefined,
+      command: config.command,
+      args: [...config.args],
+      env: config.env ? { ...Bun.env, ...config.env } as Record<string, string> : undefined,
     });
 
     this.client = new Client(
@@ -39,7 +48,11 @@ export class BackendConnection {
 
   async start(): Promise<void> {
     await this.client.connect(this.transport);
-    this.ready = true;
+    this._ready = true;
+    this.client.onclose = () => {
+      if (this._ready) console.warn(`[${this.name}] Backend closed`);
+      this._ready = false;
+    };
     console.log(`[${this.name}] Connected (pid: ${this.transport.pid})`);
 
     const caps = this.client.getServerCapabilities();
@@ -49,7 +62,7 @@ export class BackendConnection {
   }
 
   async stop(): Promise<void> {
-    this.ready = false;
+    this._ready = false;
     await this.client.close();
     console.log(`[${this.name}] Disconnected`);
   }
@@ -59,6 +72,7 @@ export class BackendConnection {
    * Each HTTP session gets its own Server + Transport pair.
    */
   createProxyServer(): Server {
+    if (!this._ready) throw new Error(`[${this.name}] not connected`);
     const caps = this.client.getServerCapabilities() ?? {};
 
     const server = new Server(
@@ -115,11 +129,15 @@ export class BackendConnection {
 export class ProxyManager {
   private backends = new Map<string, BackendConnection>();
 
-  async startAll(servers: Record<string, IStdioServerConfig>): Promise<void> {
+  async startAll(servers: Readonly<Record<string, IStdioServerConfig>>): Promise<void> {
     const entries = Object.entries(servers);
     console.log(`Starting ${entries.length} backend server(s)...\n`);
 
     for (const [name, config] of entries) {
+      if (this.backends.has(name)) {
+        console.warn(`[${name}] Already started; skipping`);
+        continue;
+      }
       const backend = new BackendConnection(name, config);
       try {
         await backend.start();
