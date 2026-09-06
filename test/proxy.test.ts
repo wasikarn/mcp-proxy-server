@@ -43,4 +43,14 @@ describe("ProxyManager", () => {
     expect(m.getBackend("echo")).toBe(first);
     await m.stopAll();
   });
+
+  test("status reports degraded once a backend dies", async () => {
+    const m = new ProxyManager();
+    await m.startAll({ echo: ECHO });
+    expect(m.status()).toEqual({ ok: true, backends: [{ name: "echo", ready: true }] });
+    process.kill(m.getBackend("echo")!.pid!, "SIGKILL");
+    await until(() => !m.getBackend("echo")!.ready);
+    expect(m.status()).toEqual({ ok: false, backends: [{ name: "echo", ready: false }] });
+    await m.stopAll();
+  });
 });

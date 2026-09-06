@@ -154,6 +154,12 @@ export class ProxyManager {
     return this.backends.get(name);
   }
 
+  /** Liveness of every started backend; ok is false once any child has exited. */
+  status(): { ok: boolean; backends: { name: string; ready: boolean }[] } {
+    const backends = Array.from(this.backends.values()).map((b) => ({ name: b.name, ready: b.ready }));
+    return { ok: backends.every((b) => b.ready), backends };
+  }
+
   getBackendNames(): string[] {
     return Array.from(this.backends.keys());
   }

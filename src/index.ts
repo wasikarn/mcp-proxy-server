@@ -78,7 +78,7 @@ async function handleMcp(req: Request, serverName: string): Promise<Response> {
   }
 
   if (!backend.ready) {
-    return jsonResponse({ error: `Server '${serverName}' not ready` }, 503);
+    return jsonResponse({ error: `Server '${serverName}' backend exited; restart the proxy` }, 503);
   }
 
   // Check for existing session
@@ -140,11 +140,13 @@ const server = Bun.serve({
           active++;
         }
       }
+      const health = manager.status();
       return jsonResponse({
-        status: "ok",
+        status: health.ok ? "ok" : "degraded",
         servers: manager.getBackendNames(),
+        backends: health.backends,
         sessions: { total: sessions.size, active, stale },
-      });
+      }, health.ok ? 200 : 503);
     }
 
     // Purge sessions (?force=true to purge all)

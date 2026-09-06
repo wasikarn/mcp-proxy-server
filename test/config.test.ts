@@ -12,7 +12,7 @@ async function withConfig(obj: unknown): Promise<ReturnType<typeof loadConfig>> 
 }
 
 describe("loadConfig", () => {
-  test("defaults args to [] without mutating after validation", async () => {
+  test("defaults args to []", async () => {
     const c = await withConfig({ servers: { a: { command: "x" } } });
     expect(c.servers.a.args).toEqual([]);
   });
@@ -30,7 +30,7 @@ describe("loadConfig", () => {
     await expect(withConfig({ servers: { a: { command: "x", args: [], env: { A: 1 } } } })).rejects.toThrow();
   });
 
-  test("rejects server names the router can never match", async () => {
+  test("rejects the two name shapes the router can never match (slash, empty)", async () => {
     await expect(withConfig({ servers: { "a/b": { command: "x", args: [] } } })).rejects.toThrow(/Invalid key|too small/);
     await expect(withConfig({ servers: { "": { command: "x", args: [] } } })).rejects.toThrow(/Invalid key|too small/);
   });

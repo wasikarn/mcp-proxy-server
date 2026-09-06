@@ -3,8 +3,8 @@ import type { IProxyConfig } from "./types.js";
 
 const DEFAULT_CONFIG_PATH = `${import.meta.dir}/../config.json`;
 
-// Same shape the router matches in index.ts (/^\/mcp\/([^/]+)$/): a name with "/" or
-// an empty name would start a child nobody can reach.
+// Rejects the two shapes the router (index.ts /^\/mcp\/([^/]+)$/) can never match: "/" in the
+// name, or an empty name. Other names must still be URL-safe ASCII to be reachable.
 const serverName = z.string().min(1).regex(/^[^/]+$/, "server name must not contain '/'");
 
 const stdioServerSchema = z.object({
