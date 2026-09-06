@@ -53,4 +53,10 @@ describe("ProxyManager", () => {
     expect(m.status()).toEqual({ ok: false, backends: [{ name: "echo", ready: false }] });
     await m.stopAll();
   });
+  test("status reports degraded when a backend fails to start", async () => {
+    const m = new ProxyManager();
+    await m.startAll({ bad: { command: "/nonexistent-binary-xyz", args: [] } });
+    expect(m.status()).toEqual({ ok: false, backends: [{ name: "bad", ready: false }] });
+    await m.stopAll();
+  });
 });

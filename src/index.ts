@@ -78,7 +78,7 @@ async function handleMcp(req: Request, serverName: string): Promise<Response> {
   }
 
   if (!backend.ready) {
-    return jsonResponse({ error: `Server '${serverName}' backend exited; restart the proxy` }, 503);
+    return jsonResponse({ error: `Server '${serverName}' backend not connected (failed to start or exited); check the log and restart the proxy` }, 503);
   }
 
   // Check for existing session

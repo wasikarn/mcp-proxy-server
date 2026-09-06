@@ -144,6 +144,7 @@ export class ProxyManager {
         this.backends.set(name, backend);
       } catch (err) {
         console.error(`[${name}] Failed to start: ${err}`);
+        this.backends.set(name, backend); // kept, not ready: status() and /mcp/<name> report it
       }
     }
 
@@ -154,7 +155,7 @@ export class ProxyManager {
     return this.backends.get(name);
   }
 
-  /** Liveness of every started backend; ok is false once any child has exited. */
+  /** Liveness of every configured backend; ok is false if any failed to start or has exited. */
   status(): { ok: boolean; backends: { name: string; ready: boolean }[] } {
     const backends = Array.from(this.backends.values()).map((b) => ({ name: b.name, ready: b.ready }));
     return { ok: backends.every((b) => b.ready), backends };
